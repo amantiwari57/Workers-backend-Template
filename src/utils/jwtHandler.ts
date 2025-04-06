@@ -1,3 +1,4 @@
+import { Context } from "hono";
 import { Jwt } from "hono/utils/jwt";
 
 const secret = "your-secret-key"; // Replace this with your actual secret
@@ -29,3 +30,27 @@ export const verifyToken = async (token: string) => {
       console.error("Token verification failed:", error);
       throw new Error("Unauthorized");
     }}
+
+    export const authenticate = async (c: Context) => {
+      const authHeader = c.req.header("Authorization");
+    
+      // Ensure header exists and starts with "Bearer "
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return null;
+      }
+    
+      const token = authHeader.slice(7).trim(); // Removes "Bearer " prefix
+    
+      try {
+        const decoded = await verifyToken(token);
+        if (!decoded) return null;
+    
+        return {
+          userId: decoded.userId as string,
+          email: decoded.email as string,
+        };
+      } catch (error) {
+        console.error("JWT verification failed:", error);
+        return null;
+      }
+    };
