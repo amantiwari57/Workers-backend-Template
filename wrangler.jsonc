@@ -6,9 +6,10 @@
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
+,"vars": {
+    "GOOGLE_CLIENT_ID": "245640490081-s0bitdegqg1hj9e3kk9v7hqhfe4nilho.apps.googleusercontent.com",
+    "GOOGLE_CLIENT_SECRET": "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",
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
@@ -21,13 +22,13 @@
   //     "bucket_name": "my-bucket"
   //   }
   // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
-  //   }
-  // ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "live-coder",
+      "database_id": "66ee9821-0e09-4312-8b67-34c9e153c81d"
+    }
+  ]
   // "ai": {
   //   "binding": "AI"
   // },
@@ -35,4 +36,6 @@
   //   "enabled": true,
   //   "head_sampling_rate": 1
   // }
+  ,
+
 }
