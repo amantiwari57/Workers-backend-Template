@@ -9,8 +9,8 @@
   "vars": {
     "GOOGLE_CLIENT_ID": "245640490081-s0bitdegqg1hj9e3kk9v7hqhfe4nilho.apps.googleusercontent.com",
     "GOOGLE_CLIENT_SECRET": "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",
-    "AppID": "7763575cd54f3c586c6ec44b6b753677",
-    "CashFreeSecretKey": "cfsk_ma_prod_4d6402ee3854b955622af7075b53f095_32f8e9a8"
+    "AppID":"TEST103253955233579f9521325ca1e559352301",
+    "CashFreeSecretKey":"cfsk_ma_test_9d20973f0c1fd15e989b4763552adfed_9069d97d"
   },
   // "kv_namespaces": [
   //   {
