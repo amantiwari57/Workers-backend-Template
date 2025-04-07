@@ -9,7 +9,7 @@ export type Env = {
 
 const googleAuth = new Hono<{ Bindings: Env }>();
 
-const REDIRECT_URI = "http://127.0.0.1:8787/api/auth/google/callback";
+const REDIRECT_URI = "https://www.autocoder.live/auth/google/callback";
 
 googleAuth.get("/", (c) => {
   const params = new URLSearchParams({
