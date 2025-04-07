@@ -15,42 +15,48 @@ export const generateToken = async (userId: string, email: string) => {
 };
 
 export const verifyToken = async (token: string) => {
-    try {
-      const payload = await Jwt.verify(token, secret);
-  
-      if (!payload || typeof payload !== "object") {
-        throw new Error("Invalid token payload");
-      }
-  
-      const userId = payload.sub as string;
-      const email = payload.email as string;
-  
-      return { userId, email };
-    } catch (error) {
-      console.error("Token verification failed:", error);
-      throw new Error("Unauthorized");
-    }}
+  try {
+    const payload = await Jwt.verify(token, secret);
 
-    export const authenticate = async (c: Context) => {
-      const authHeader = c.req.header("Authorization");
-    
-      // Ensure header exists and starts with "Bearer "
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return null;
-      }
-    
-      const token = authHeader.slice(7).trim(); // Removes "Bearer " prefix
-    
-      try {
-        const decoded = await verifyToken(token);
-        if (!decoded) return null;
-    
-        return {
-          userId: decoded.userId as string,
-          email: decoded.email as string,
-        };
-      } catch (error) {
-        console.error("JWT verification failed:", error);
-        return null;
-      }
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Invalid token payload");
+    }
+
+    // Use payload.userId instead of payload.sub
+    const userId = payload.userId as string;
+    const email = payload.email as string;
+
+    if (!userId || !email) {
+      throw new Error("Missing userId or email in token");
+    }
+
+    return { userId, email };
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    throw new Error("Unauthorized");
+  }
+};
+
+export const authenticate = async (c: Context) => {
+  const authHeader = c.req.header("Authorization");
+
+  // Ensure header exists and starts with "Bearer "
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.slice(7).trim(); // Removes "Bearer " prefix
+
+  try {
+    const decoded = await verifyToken(token);
+    if (!decoded) return null;
+
+    return {
+      userId: decoded.userId as string,
+      email: decoded.email as string,
     };
+  } catch (error) {
+    console.error("JWT verification failed:", error);
+    return null;
+  }
+};

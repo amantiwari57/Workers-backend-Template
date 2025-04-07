@@ -71,68 +71,118 @@ const subscriptionSchema = z.object({
 });
 
 subscriptions.post("/", async (c) => {
-    const auth = await authenticate(c);
-    if (!auth) return c.json({ error: "Unauthorized" }, 401);
-  
-    const body = await c.req.json();
-    const parsed = subscriptionSchema.safeParse(body);
-  
-    if (!parsed.success) {
+  const auth = await authenticate(c);
+  if (!auth) return c.json({ error: "Unauthorized" }, 401);
+
+  const body = await c.req.json();
+  const parsed = subscriptionSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json(
+      { error: "Invalid input", details: parsed.error.format() },
+      400
+    );
+  }
+
+  const { subscriptionType, paymentID } = parsed.data;
+  const userId = parseInt(auth.userId);
+
+  try {
+    // Check for active subscription
+    const activeSub = await c.env.DB.prepare(
+      `SELECT * FROM subscriptions WHERE userID = ? AND expiresAt > CURRENT_TIMESTAMP`
+    )
+      .bind(userId)
+      .first();
+
+    if (activeSub) {
+      return c.json({ error: "User already has an active subscription" }, 409);
+    }
+
+    // Check if payment belongs to user
+    // const payment = await c.env.DB.prepare(
+    //   `SELECT * FROM payments WHERE paymentID = ? AND userID = ?`
+    // )
+    //   .bind(paymentID, userId)
+    //   .first();
+
+    // if (!payment) {
+    //   return c.json({ error: "Payment does not belong to the user" }, 403);
+    // }
+
+    // Calculate expiry
+    const now = new Date();
+    const expiresAt = new Date(
+      subscriptionType === "monthly"
+        ? now.setMonth(now.getMonth() + 1)
+        : now.setFullYear(now.getFullYear() + 1)
+    ).toISOString();
+
+    const createdAt = new Date().toISOString();
+
+    // Insert subscription
+    const insert = await c.env.DB.prepare(
+      `INSERT INTO subscriptions (userID, paymentID, subscriptionType, createdAt, expiresAt)
+         VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(userId, paymentID, subscriptionType, createdAt, expiresAt)
+      .run();
+
+    if (insert.success) {
+      return c.json({ message: "Subscription created successfully" }, 201);
+    } else {
+      return c.json({ error: "Failed to create subscription" }, 500);
+    }
+  } catch (err) {
+    console.error("Create subscription error:", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
+subscriptions.get("/check", async (c) => {
+  const auth = await authenticate(c);
+  console.log("Auth:", auth);
+  if (!auth) return c.json({ error: "Unauthorized" }, 401);
+
+  const userId = parseInt(auth.userId);
+  if (isNaN(userId)) {
+    console.error("Invalid user ID:", auth.userId);
+    return c.json({ error: "Invalid user ID" }, 400);
+  }
+
+  console.log("User ID:", userId);
+
+  try {
+    const activeSub = await c.env.DB.prepare(
+      `
+        SELECT * FROM subscriptions 
+        WHERE userID = ? AND expiresAt > CURRENT_TIMESTAMP
+      `
+    )
+      .bind(userId)
+      .first();
+
+    if (activeSub) {
       return c.json(
-        { error: "Invalid input", details: parsed.error.format() },
-        400
+        {
+          active: true,
+          subscription: activeSub,
+        },
+        200
       );
     }
-  
-    const { subscriptionType, paymentID } = parsed.data;
-    const userId = parseInt(auth.userId);
-  
-    try {
-      // Check for active subscription
-      const activeSub = await c.env.DB.prepare(
-        `SELECT * FROM subscriptions WHERE userID = ? AND expiresAt > CURRENT_TIMESTAMP`
-      )
-        .bind(userId)
-        .first();
-  
-      if (activeSub) {
-        return c.json({ error: "User already has an active subscription" }, 409);
-      }
-  
-      // Check if payment belongs to user
-      const payment = await c.env.DB.prepare(
-        `SELECT * FROM payments WHERE paymentID = ? AND userID = ?`
-      ).bind(paymentID, userId).first();
-  
-      if (!payment) {
-        return c.json({ error: "Payment does not belong to the user" }, 403);
-      }
-  
-      // Calculate expiry
-      const now = new Date();
-      const expiresAt = new Date(
-        subscriptionType === "monthly"
-          ? now.setMonth(now.getMonth() + 1)
-          : now.setFullYear(now.getFullYear() + 1)
-      ).toISOString();
-  
-      const createdAt = new Date().toISOString();
-  
-      // Insert subscription
-      const insert = await c.env.DB.prepare(
-        `INSERT INTO subscriptions (userID, paymentID, subscriptionType, createdAt, expiresAt)
-         VALUES (?, ?, ?, ?, ?)`
-      ).bind(userId, paymentID, subscriptionType, createdAt, expiresAt).run();
-  
-      if (insert.success) {
-        return c.json({ message: "Subscription created successfully" }, 201);
-      } else {
-        return c.json({ error: "Failed to create subscription" }, 500);
-      }
-    } catch (err) {
-      console.error("Create subscription error:", err);
-      return c.json({ error: "Internal server error" }, 500);
-    }
-  });
-  
+
+    return c.json(
+      {
+        active: false,
+        message: "No active subscription",
+      },
+      200
+    );
+  } catch (err) {
+    console.error("Subscription check error:", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
 export default subscriptions;
