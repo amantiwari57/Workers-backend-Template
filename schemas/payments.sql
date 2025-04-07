@@ -6,5 +6,5 @@ CREATE TABLE payments (
     paymentMethod VARCHAR(255),
     transactionID VARCHAR(255),
     paymentStatus VARCHAR(50),
-    FOREIGN KEY (userID) REFERENCES users(userID)
+    FOREIGN KEY (userID) REFERENCES users(id)
 );
