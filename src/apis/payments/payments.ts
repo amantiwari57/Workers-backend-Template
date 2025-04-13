@@ -1,6 +1,15 @@
 import { Context, Hono } from "hono";
 import { authenticate, verifyToken } from "../../utils/jwtHandler";
-import { paymentSchema } from "../../validators/paymentsValidator";
+import { z } from "zod";
+
+
+// Define the payment schema using Zod
+ const paymentSchema = z.object({
+  amount: z.number().positive("Amount must be a positive number"),
+  customer_phone: z
+    .string()
+    .regex(/^\d{10}$/, "Phone number must be 10 digits"),
+});
 
 // Define environment bindings
 export type Env = {
@@ -100,7 +109,10 @@ payments.get("/:id", async (c) => {
 });
 
 // Create a payment link
+
+
 payments.post("/create", async (c) => {
+  // Authenticate the user
   const auth = await authenticate(c);
   if (!auth) return c.json({ error: "Unauthorized" }, 401);
 
@@ -109,31 +121,43 @@ payments.post("/create", async (c) => {
 
   try {
     const orderId = `order_${Date.now()}_${userId}`;
+    
+    // Parse the incoming request body
     const body = await c.req.json();
     const parsed = paymentSchema.safeParse(body);
 
-    const { amount, customer_phone } = parsed.success ? parsed.data : {};
+    // Check if parsing was successful
+    if (!parsed.success) {
+      console.error("Invalid data:", parsed.error); // Log the error details
+      return c.json({ error: "Invalid input data" }, 400);
+    }
 
+    // Extract parsed data
+    const { amount, customer_phone } = parsed.data;
+
+    console.log("Parsed Amount:", amount); // This should now print the correct amount
+
+    // Ensure amount is a valid number and greater than 0 (although Zod already validates it)
     if (!amount || isNaN(amount) || amount <= 0) {
       return c.json({ error: "Invalid amount" }, 400);
     }
 
+    // Create the order payload for Cashfree
     const orderPayload = {
       customer_details: {
         customer_id: String(userId),
         customer_email: email,
         customer_phone: customer_phone, // Required
       },
-      order_amount: parseFloat(amount.toString()),
+      order_amount: amount, // No need to parse again, it's already a valid number
       order_currency: "INR",
       order_id: orderId,
       order_note: "Subscription Payment",
     };
 
     console.log("Creating order with payload:", orderPayload);
-    console.log("Using AppID:", c.env.AppID);
-    console.log("Using CashFreeSecretKey:", c.env.CashFreeSecretKey);
 
+    // Make a request to Cashfree to create an order
     const orderRes = await fetch(baseUrl, {
       method: "POST",
       headers: {
@@ -146,23 +170,26 @@ payments.post("/create", async (c) => {
       body: JSON.stringify(orderPayload),
     });
 
-    const orderData = (await orderRes.json()) as CashfreeOrderResponse;
+    const orderData = await orderRes.json() as CashfreeOrderResponse;
     console.log("Order creation response:", orderData);
 
+    // Check for errors in the Cashfree response
     if (!orderRes.ok) {
       console.error("Cashfree order error:", orderData);
       return c.json(
         { error: orderData.message || "Failed to create order" },
-        (orderRes.status as 400 | 401 | 403 | 500) || 500
+      500
       );
     }
 
+    // Extract payment session ID from response
     const paymentSessionId = orderData.payment_session_id;
     if (!paymentSessionId) {
       console.error("No payment_session_id in response:", orderData);
       return c.json({ error: "Failed to generate payment session" }, 500);
     }
 
+    // Insert the payment details into the database
     const now = new Date().toISOString();
     const insert = await c.env.DB.prepare(
       `INSERT INTO payments (userID, paymentDate, amount, paymentMethod, transactionID, paymentStatus) VALUES (?, ?, ?, ?, ?, ?)`
@@ -175,12 +202,14 @@ payments.post("/create", async (c) => {
       return c.json({ error: "Failed to store payment record" }, 500);
     }
 
+    // Respond with payment session ID and order ID
     return c.json({ paymentSessionId, orderId }, 201);
   } catch (err) {
     console.error("Create payment error:", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
+
 
 // Webhook handler for Cashfree events
 payments.post("/webhook", async (c) => {
