@@ -226,7 +226,7 @@ payments.post("/webhook", async (c) => {
 
     // Handle successful payments
     if (
-      event_type === "PAYMENT_SUCCESS_WEBHOOK" ||
+      event_type === "payment.success" ||
       data?.payment_status === "SUCCESS"
     ) {
       const txnId = order_id;
@@ -256,7 +256,7 @@ payments.post("/webhook", async (c) => {
 
     // Handle failed payments
     if (
-      event_type === "PAYMENT_FAILED_WEBHOOK" ||
+      event_type === "payment.failed" ||
       data?.payment_status === "FAILED"
     ) {
       const txnId = order_id;
@@ -283,5 +283,6 @@ payments.post("/webhook", async (c) => {
     return c.json({ error: "Webhook processing failed" }, 500);
   }
 });
+
 
 export default payments;

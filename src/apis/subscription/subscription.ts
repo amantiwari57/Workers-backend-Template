@@ -99,16 +99,20 @@ subscriptions.post("/", async (c) => {
       return c.json({ error: "User already has an active subscription" }, 409);
     }
 
-    // Check if payment belongs to user
-    // const payment = await c.env.DB.prepare(
-    //   `SELECT * FROM payments WHERE paymentID = ? AND userID = ?`
-    // )
-    //   .bind(paymentID, userId)
-    //   .first();
+    // Verify payment status
+    const payment = await c.env.DB.prepare(
+      `SELECT * FROM payments WHERE paymentID = ? AND userID = ?`
+    )
+      .bind(paymentID, userId)
+      .first();
 
-    // if (!payment) {
-    //   return c.json({ error: "Payment does not belong to the user" }, 403);
-    // }
+    if (!payment) {
+      return c.json({ error: "Payment not found or does not belong to the user" }, 404);
+    }
+
+    if (payment.paymentStatus !== "success") {
+      return c.json({ error: "Payment is not successful" }, 400);
+    }
 
     // Calculate expiry
     const now = new Date();
@@ -128,16 +132,29 @@ subscriptions.post("/", async (c) => {
       .bind(userId, paymentID, subscriptionType, createdAt, expiresAt)
       .run();
 
-    if (insert.success) {
-      return c.json({ message: "Subscription created successfully" }, 201);
-    } else {
+    if (!insert.success) {
       return c.json({ error: "Failed to create subscription" }, 500);
     }
+
+    // Update payment status to 'subscribed'
+    const update = await c.env.DB.prepare(
+      `UPDATE payments SET paymentStatus = ? WHERE paymentID = ?`
+    )
+      .bind("subscribed", paymentID)
+      .run();
+
+    if (!update.success) {
+      console.error("Failed to update payment status to 'subscribed'");
+      // Depending on your requirements, you might want to handle this scenario
+    }
+
+    return c.json({ message: "Subscription created successfully" }, 201);
   } catch (err) {
     console.error("Create subscription error:", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
+
 
 subscriptions.get("/check", async (c) => {
   const auth = await authenticate(c);
