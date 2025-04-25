@@ -223,10 +223,11 @@ payments.post("/webhook", async (c) => {
     }>();
 
     const { order_id, event_time, event_type, payment, data } = body;
+    console.log("Webhook Order ID:", order_id);
 
     // Handle successful payments
     if (
-      event_type === "payment.success" ||
+      event_type === "success.payment" ||
       data?.payment_status === "SUCCESS"
     ) {
       const txnId = order_id;
