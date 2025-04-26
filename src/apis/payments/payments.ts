@@ -1,10 +1,11 @@
 import { Context, Hono } from "hono";
 import { authenticate, verifyToken } from "../../utils/jwtHandler";
 import { z } from "zod";
-
+import Razorpay from "razorpay";
+import { computeHmacSHA256 } from "../../utils/hmac";
 
 // Define the payment schema using Zod
- const paymentSchema = z.object({
+const paymentSchema = z.object({
   amount: z.number().positive("Amount must be a positive number"),
   customer_phone: z
     .string()
@@ -15,8 +16,9 @@ import { z } from "zod";
 export type Env = {
   DB: D1Database; // Cloudflare D1 database type
   JWT_SECRET: string;
-  AppID: string;
-  CashFreeSecretKey: string;
+  keyID: string;
+  keySecret: string;
+  WEBHOOK_SECRET: string;
 };
 
 // Define Cashfree response type based on their API docs
@@ -109,181 +111,128 @@ payments.get("/:id", async (c) => {
 });
 
 // Create a payment link
+payments.post("/create-order", async (c) => {
+  const authResult = await authenticate(c);
+  console.log("auth result", authResult);
+  if (!authResult) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
 
+  const body = await c.req.json();
+  console.log("Body received:", body);
 
-payments.post("/create", async (c) => {
-  // Authenticate the user
-  const auth = await authenticate(c);
-  if (!auth) return c.json({ error: "Unauthorized" }, 401);
+  const validation = paymentSchema.safeParse(body);
 
-  const { userId, email } = auth;
-  const baseUrl = "https://sandbox.cashfree.com/pg/orders"; // Sandbox for testing
+  console.log("validation", validation);
+  if (!validation.success) {
+    return c.json({ error: validation.error.format() }, 400);
+  }
+
+  const { amount, customer_phone } = validation.data;
+  const { userId } = authResult;
+
+  // Initialize Razorpay within the request context
+  const razorpay = new Razorpay({
+    key_id: c.env.keyID,
+    key_secret: c.env.keySecret,
+  });
 
   try {
-    const orderId = `order_${Date.now()}_${userId}`;
-    
-    // Parse the incoming request body
-    const body = await c.req.json();
-    const parsed = paymentSchema.safeParse(body);
-
-    // Check if parsing was successful
-    if (!parsed.success) {
-      console.error("Invalid data:", parsed.error); // Log the error details
-      return c.json({ error: "Invalid input data" }, 400);
-    }
-
-    // Extract parsed data
-    const { amount, customer_phone } = parsed.data;
-
-    console.log("Parsed Amount:", amount); // This should now print the correct amount
-
-    // Ensure amount is a valid number and greater than 0 (although Zod already validates it)
-    if (!amount || isNaN(amount) || amount <= 0) {
-      return c.json({ error: "Invalid amount" }, 400);
-    }
-
-    // Create the order payload for Cashfree
-    const orderPayload = {
-      customer_details: {
-        customer_id: String(userId),
-        customer_email: email,
-        customer_phone: customer_phone, // Required
-      },
-      order_amount: amount, // No need to parse again, it's already a valid number
-      order_currency: "INR",
-      order_id: orderId,
-      order_note: "Subscription Payment",
+    const options = {
+      amount: amount * 100, // Razorpay expects amount in paise
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`,
     };
 
-    console.log("Creating order with payload:", orderPayload);
+    const order = await razorpay.orders.create(options);
 
-    // Make a request to Cashfree to create an order
-    const orderRes = await fetch(baseUrl, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        "x-api-version": "2023-08-01",
-        "x-client-id": c.env.AppID,
-        "x-client-secret": c.env.CashFreeSecretKey,
-      },
-      body: JSON.stringify(orderPayload),
-    });
-
-    const orderData = await orderRes.json() as CashfreeOrderResponse;
-    console.log("Order creation response:", orderData);
-
-    // Check for errors in the Cashfree response
-    if (!orderRes.ok) {
-      console.error("Cashfree order error:", orderData);
-      return c.json(
-        { error: orderData.message || "Failed to create order" },
-      500
-      );
-    }
-
-    // Extract payment session ID from response
-    const paymentSessionId = orderData.payment_session_id;
-    if (!paymentSessionId) {
-      console.error("No payment_session_id in response:", orderData);
-      return c.json({ error: "Failed to generate payment session" }, 500);
-    }
-
-    // Insert the payment details into the database
-    const now = new Date().toISOString();
-    const insert = await c.env.DB.prepare(
-      `INSERT INTO payments (userID, paymentDate, amount, paymentMethod, transactionID, paymentStatus) VALUES (?, ?, ?, ?, ?, ?)`
+    // Optionally insert into your DB
+    await c.env.DB.prepare(
+      `INSERT INTO payments (userID, amount, paymentDate, paymentMethod, transactionID, paymentStatus)
+       VALUES (?, ?, datetime('now'), 'razorpay', ?, 'pending')`
     )
-      .bind(userId, now, amount, "cashfree", orderId, "pending")
+      .bind(userId, amount, order.id)
       .run();
 
-    if (!insert.success) {
-      console.error("Database Error:", insert.error);
-      return c.json({ error: "Failed to store payment record" }, 500);
-    }
-
-    // Respond with payment session ID and order ID
-    return c.json({ paymentSessionId, orderId }, 201);
+    return c.json({
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key: c.env.keyID,
+      successPage: "https://localhost:8000/payment-success",
+    });
   } catch (err) {
-    console.error("Create payment error:", err);
-    return c.json({ error: "Internal server error" }, 500);
+    console.error("Razorpay order creation failed:", err);
+    return c.json({ error: "Order creation failed" }, 500);
+  }
+});
+
+// Verify a payment after success
+payments.post("/verify-payment", async (c) => {
+  const body = await c.req.json();
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return c.json({ error: "Missing payment details" }, 400);
+  }
+
+  const expectedSignature = await computeHmacSHA256(c.env.keySecret, razorpay_order_id, razorpay_payment_id);
+
+  if (expectedSignature === razorpay_signature) {
+    // Update payment status in database
+    await c.env.DB.prepare(
+      `UPDATE payments SET paymentStatus = 'success' WHERE transactionID = ?`
+    )
+    .bind(razorpay_order_id)
+    .run();
+
+    return c.json({ success: true, message: "Payment verified" });
+  } else {
+    return c.json({ error: "Invalid signature" }, 400);
   }
 });
 
 
-// Webhook handler for Cashfree events
-payments.post("/webhook", async (c) => {
-  try {
-    const body = await c.req.json<{
-      order_id: string;
-      event_time: string;
-      event_type: string;
-      payment?: { amount: number };
-      data?: { payment_status: string; order_amount: number };
-    }>();
+// payments.post("/webhook", async (c) => {
+//   try {
+//     // Retrieve the raw body and signature
+//     const rawBody = await c.req.text();
+//     const signature = c.req.header("x-razorpay-signature");
+//     const secret = c.env.WEBHOOK_SECRET;
 
-    const { order_id, event_time, event_type, payment, data } = body;
-    console.log("Webhook Order ID:", order_id);
+//     // Verify the signature
+//     const expectedSignature = await computeHmacSHA256(secret, rawBody);
+//     if (signature !== expectedSignature) {
+//       console.warn("Invalid webhook signature");
+//       return c.json({ error: "Invalid signature" }, 400);
+//     }
 
-    // Handle successful payments
-    if (
-      event_type === "success.payment" ||
-      data?.payment_status === "SUCCESS"
-    ) {
-      const txnId = order_id;
-      const paidAt = event_time;
-      const amount = data?.order_amount || payment?.amount;
+//     // Parse the JSON body
+//     const body = JSON.parse(rawBody);
+//     const event = body.event;
 
-      if (!amount) {
-        console.error("Missing amount in webhook:", body);
-        return c.json({ error: "Invalid webhook data" }, 400);
-      }
+//     // Handle specific events
+//     if (event === "payment.captured") {
+//       const payment = body.payload.payment.entity;
+//       const transactionID = payment.order_id;
+//       const amount = payment.amount / 100; // Convert from paise to INR
+//       const paymentDate = new Date(payment.created_at * 1000).toISOString();
 
-      const update = await c.env.DB.prepare(
-        `UPDATE payments 
-         SET paymentStatus = ?, paymentDate = ?, amount = ? 
-         WHERE transactionID = ?`
-      )
-        .bind("success", paidAt, amount, txnId)
-        .run();
+//       // Update the payment record in the database
+//       await c.env.DB.prepare(
+//         `UPDATE payments SET paymentStatus = 'success', paymentDate = ? WHERE transactionID = ?`
+//       )
+//         .bind(paymentDate, transactionID)
+//         .run();
 
-      if (!update.success) {
-        console.error("Payment update failed:", update);
-        return c.json({ error: "Failed to update payment status" }, 500);
-      }
+//       console.log(`Payment ${payment.id} captured and updated.`);
+//     }
 
-      return c.json({ success: true }, 200);
-    }
-
-    // Handle failed payments
-    if (
-      event_type === "payment.failed" ||
-      data?.payment_status === "FAILED"
-    ) {
-      const txnId = order_id;
-
-      const update = await c.env.DB.prepare(
-        `UPDATE payments 
-         SET paymentStatus = ? 
-         WHERE transactionID = ?`
-      )
-        .bind("failed", txnId)
-        .run();
-
-      if (!update.success) {
-        console.error("Payment update failed:", update);
-        return c.json({ error: "Failed to update payment status" }, 500);
-      }
-
-      return c.json({ success: true }, 200);
-    }
-
-    return c.json({ message: "Unhandled event type" }, 206);
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return c.json({ error: "Webhook processing failed" }, 500);
-  }
-});
-
-
+//     // Respond with a success status
+//     return c.json({ status: "ok" });
+//   } catch (error) {
+//     console.error("Webhook handling error:", error);
+//     return c.json({ error: "Internal server error" }, 500);
+//   }
+// });
 export default payments;

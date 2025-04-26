@@ -2,15 +2,15 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "live-code-backned",
   "main": "src/index.ts",
-  "compatibility_date": "2025-04-06",
-  // "compatibility_flags": [
-  //   "nodejs_compat"
-  // ],
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+
   "vars": {
     "GOOGLE_CLIENT_ID": "245640490081-s0bitdegqg1hj9e3kk9v7hqhfe4nilho.apps.googleusercontent.com",
     "GOOGLE_CLIENT_SECRET": "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",
-    "AppID":"TEST103253955233579f9521325ca1e559352301",
-    "CashFreeSecretKey":"cfsk_ma_test_9d20973f0c1fd15e989b4763552adfed_9069d97d"
+    "keyID": "rzp_test_ujZzg8XROGV3ED",
+    "webhookSecret": "Chirag@#*8133",
+    "keySecret": "SsvHbeNfYmWnlXHJPIgJplEn"
   },
   // "kv_namespaces": [
   //   {
