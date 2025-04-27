@@ -1,67 +1,75 @@
-// signup.ts
 import { Hono } from "hono";
 import { z } from "zod";
 import { UserSchema } from "../../validators/userValidation";
-import { hashPassword, verifyPassword } from "../../utils/passwordHash";
+import { hashPassword } from "../../utils/passwordHash";
 import { generateToken } from "../../utils/jwtHandler";
-
+import { sendOtpEmail } from "../../utils/nodemailer";
 
 // Environment type for D1 database
 export type Env = {
-  DB: D1Database; // D1 database binding
+  DB: D1Database;
+  SMTP_USER:string;
+  API_KEY:string
 };
 
-// Hono app with D1 bindings
+// Hono app
 const signup = new Hono<{ Bindings: Env }>();
 
-// Signup route
+// Utility to generate random 6-digit OTP
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// --- SIGNUP Route (no JWT here) ---
 signup.post("/", async (c) => {
   try {
-    // Parse and validate request body
     const body = await c.req.json();
     const result = UserSchema.safeParse(body);
 
     if (!result.success) {
-      return c.json({ error: result.error.errors }, 400); // Bad request
+      return c.json({ error: result.error.errors }, 400);
     }
 
     const { username, email, password } = result.data;
 
-    // Check if email or username already exists
+    // Check if user exists
     const existingUserStmt = c.env.DB.prepare(
       "SELECT * FROM users WHERE email = ? OR username = ?"
     ).bind(email, username);
     const existingUser = await existingUserStmt.all();
 
     if (existingUser.results && existingUser.results.length > 0) {
-      return c.json({ error: "Email or username already taken" }, 409); // Conflict
+      return c.json({ error: "Email or username already taken" }, 409);
     }
 
-    // Hash the password (salt and hash combined)
     const hashedPassword = hashPassword(password);
 
-    // Insert the new user into the database
+    // Insert user
     const insertStmt = c.env.DB.prepare(
       "INSERT INTO users (username, email, password) VALUES (?, ?, ?) RETURNING id, username, email, created_at"
     ).bind(username, email, hashedPassword);
+    const res = await insertStmt.first();
 
-    const res = await insertStmt.first(); // Get the inserted row
-
-  
-
-    if (!res|| !res.id) {
+    if (!res || !res.id) {
       throw new Error("Failed to insert user");
     }
 
-    const token = await generateToken(res?.id.toString(), email); // Generate JWT token
-    // Return the created user (excluding password)
+    // Generate OTP
+    const otp = generateOTP();
+    const otpInsert = c.env.DB.prepare(
+      "INSERT INTO user_otps (user_id, otp) VALUES (?, ?)"
+    ).bind(res.id, otp);
+    await otpInsert.run();
+    await sendOtpEmail(c.env, email, otp);
+
+    // You would send this OTP via email/SMS in production
+    // console.log(`Generated OTP for ${email}: ${otp}`);
+
     return c.json(
       {
-        message: "User created successfully",
-        user: res,
-        token:token,
+        message: "User created successfully. OTP sent for verification."
       },
-      201 // Created
+      201
     );
   } catch (error) {
     console.error("Signup error:", error);
@@ -69,6 +77,69 @@ signup.post("/", async (c) => {
   }
 });
 
+// --- VERIFY OTP Route (generate JWT here) ---
+const VerifyOtpSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().length(6),
+});
 
+signup.post("/verify-otp", async (c) => {
+  try {
+    const body = await c.req.json();
+    const result = VerifyOtpSchema.safeParse(body);
+
+    if (!result.success) {
+      return c.json({ error: result.error.errors }, 400);
+    }
+
+    const { email, otp } = result.data;
+
+    // Fetch user by email
+    const userStmt = c.env.DB.prepare(
+      "SELECT id FROM users WHERE email = ?"
+    ).bind(email);
+    const user = await userStmt.first();
+
+    if (!user) {
+      return c.json({ error: "User not found" }, 404);
+    }
+
+    const { id: userId } = user as { id: number };
+
+    // Validate OTP
+    const otpStmt = c.env.DB.prepare(
+      `SELECT * FROM user_otps 
+       WHERE user_id = ? AND otp = ? AND expires_at > CURRENT_TIMESTAMP`
+    ).bind(userId, otp);
+    const otpRecord = await otpStmt.first();
+
+    if (!otpRecord) {
+      return c.json({ error: "Invalid or expired OTP" }, 400);
+    }
+
+    // OTP valid, generate JWT token
+    const token = await generateToken(userId.toString(), email);
+
+    // Optionally delete used OTP
+    const deleteOtpStmt = c.env.DB.prepare(
+      "DELETE FROM user_otps WHERE id = ?"
+    ).bind((otpRecord as any).id);
+    await deleteOtpStmt.run();
+
+    return c.json({
+      message: "OTP verified successfully",
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        created_at: user.created_at,
+      },
+      token,
+    }, 200);
+  } catch (error) {
+    console.error("OTP verification error:", error);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
 
 export default signup;

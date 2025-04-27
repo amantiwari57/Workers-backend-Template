@@ -10,7 +10,9 @@
     "GOOGLE_CLIENT_SECRET": "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",
     "keyID": "rzp_test_ujZzg8XROGV3ED",
     "webhookSecret": "Chirag@#*8133",
-    "keySecret": "SsvHbeNfYmWnlXHJPIgJplEn"
+    "keySecret": "SsvHbeNfYmWnlXHJPIgJplEn",
+    "SMTP_USER":"8b871f002@smtp-brevo.com",
+    "API_KEY":"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",
   },
   // "kv_namespaces": [
   //   {

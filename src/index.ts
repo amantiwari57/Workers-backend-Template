@@ -23,7 +23,7 @@ app.route('/api/auth/signup', signup)
 app.route('/api/auth/login', login)
 app.route('/api/auth/google', googleAuth)
 app.route('/api/payments', payments)
-app.route('/api/subscription', subscriptions)
+app.route('/subscriptions', subscriptions)
 
 app.get('/', (c) => {
   return c.text('Hello Hono!')
