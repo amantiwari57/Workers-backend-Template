@@ -9,7 +9,7 @@ const paymentSchema = z.object({
   amount: z.number().positive("Amount must be a positive number"),
   customer_phone: z
     .string()
-    .regex(/^\d{10}$/, "Phone number must be 10 digits"),
+    .regex(/^(\+\d{1,4})?\d{10}$/, "Phone number must be 10 digits, optionally with country code"),
 });
 
 // Define environment bindings
