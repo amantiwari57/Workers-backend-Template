@@ -5,6 +5,8 @@
     "deploy": "wrangler deploy --minify"
   },
   "dependencies": {
+    "google-auth-library": "^10.1.0",
+    "googleapis": "^152.0.0",
     "hono": "^4.7.5",
     "nodemailer": "^6.10.1",
     "nodemailer-mailgun-transport": "^2.1.5",
