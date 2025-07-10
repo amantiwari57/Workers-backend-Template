@@ -6,17 +6,20 @@ export type Env = {
   DB: D1Database;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_REDIRECT_URI?: string; // Optional environment variable
 };
 
 const googleAuth = new Hono<{ Bindings: Env }>();
 
-const REDIRECT_URI = "https://www.autocoder.live/auth/google/callback";
-
 googleAuth.get("/", (c) => {
+  // Use environment variable if available, otherwise construct from request
+  const redirectUri = c.env.GOOGLE_REDIRECT_URI || 
+    `${c.req.url.split('/auth/google')[0]}/api/auth/google/callback`;
+  
   const oauth2Client = new OAuth2Client(
     c.env.GOOGLE_CLIENT_ID,
     c.env.GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
+    redirectUri
   );
 
   const authUrl = oauth2Client.generateAuthUrl({
@@ -36,11 +39,15 @@ googleAuth.get("/callback", async (c) => {
   if (!code) return c.json({ error: "No code provided" }, 400);
 
   try {
+    // Use environment variable if available, otherwise construct from request
+    const redirectUri = c.env.GOOGLE_REDIRECT_URI || 
+      `${c.req.url.split('/auth/google/callback')[0]}/api/auth/google/callback`;
+    
     // Create OAuth2 client
     const oauth2Client = new OAuth2Client(
       c.env.GOOGLE_CLIENT_ID,
       c.env.GOOGLE_CLIENT_SECRET,
-      REDIRECT_URI
+      redirectUri
     );
 
     // Exchange code for tokens

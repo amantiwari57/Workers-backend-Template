@@ -8,6 +8,7 @@
   "vars": {
     "GOOGLE_CLIENT_ID": "245640490081-s0bitdegqg1hj9e3kk9v7hqhfe4nilho.apps.googleusercontent.com",
     "GOOGLE_CLIENT_SECRET": "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",
+    "GOOGLE_REDIRECT_URI": "http://localhost:8787/api/auth/google/callback",
     "keyID": "rzp_test_ujZzg8XROGV3ED",
     "webhookSecret": "Chirag@#*8133",
     "keySecret": "SsvHbeNfYmWnlXHJPIgJplEn",

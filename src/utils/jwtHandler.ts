@@ -1,8 +1,8 @@
 import { Context } from "hono";
 import { Jwt } from "hono/utils/jwt";
 
-const ACCESS_TOKEN_SECRET = "your-access-secret-key"; // Replace with your actual secret
-const REFRESH_TOKEN_SECRET = "your-refresh-secret-key"; // Replace with your actual secret
+const ACCESS_TOKEN_SECRET = "your-access-secret-key-01003819819"; // Replace with your actual secret
+const REFRESH_TOKEN_SECRET = "your-refresh-secret-key-1019183"; // Replace with your actual secret
 
 // Token expiration times
 const ACCESS_TOKEN_EXPIRY = "15m"; // 15 minutes
