@@ -2,14 +2,14 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { UserSchema } from "../../validators/userValidation";
 import { hashPassword } from "../../utils/passwordHash";
-import { generateToken } from "../../utils/jwtHandler";
+import { generateTokenPair } from "../../utils/jwtHandler";
 import { sendOtpEmail } from "../../utils/nodemailer";
 
 // Environment type for D1 database
 export type Env = {
   DB: D1Database;
-  SMTP_USER:string;
-  API_KEY:string
+  SMTP_USER: string;
+  API_KEY: string;
 };
 
 // Hono app
@@ -44,10 +44,10 @@ signup.post("/", async (c) => {
 
     const hashedPassword = hashPassword(password);
 
-    // Insert user
+    // Insert user with default role
     const insertStmt = c.env.DB.prepare(
-      "INSERT INTO users (username, email, password) VALUES (?, ?, ?) RETURNING id, username, email, created_at"
-    ).bind(username, email, hashedPassword);
+      "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?) RETURNING id, username, email, role, created_at"
+    ).bind(username, email, hashedPassword, "user");
     const res = await insertStmt.first();
 
     if (!res || !res.id) {
@@ -62,12 +62,15 @@ signup.post("/", async (c) => {
     await otpInsert.run();
     await sendOtpEmail(c.env, email, otp);
 
-    // You would send this OTP via email/SMS in production
-    // console.log(`Generated OTP for ${email}: ${otp}`);
-
     return c.json(
       {
-        message: "User created successfully. OTP sent for verification."
+        message: "User created successfully. OTP sent for verification.",
+        user: {
+          id: res.id,
+          username: res.username,
+          email: res.email,
+          role: res.role,
+        },
       },
       201
     );
@@ -96,7 +99,7 @@ signup.post("/verify-otp", async (c) => {
 
     // Fetch user by email
     const userStmt = c.env.DB.prepare(
-      "SELECT id FROM users WHERE email = ?"
+      "SELECT id, username, email, role FROM users WHERE email = ?"
     ).bind(email);
     const user = await userStmt.first();
 
@@ -117,8 +120,8 @@ signup.post("/verify-otp", async (c) => {
       return c.json({ error: "Invalid or expired OTP" }, 400);
     }
 
-    // OTP valid, generate JWT token
-    const token = await generateToken(userId.toString(), email);
+    // OTP valid, generate token pair
+    const tokens = await generateTokenPair(userId.toString(), email, user.role as string);
 
     // Optionally delete used OTP
     const deleteOtpStmt = c.env.DB.prepare(
@@ -128,13 +131,14 @@ signup.post("/verify-otp", async (c) => {
 
     return c.json({
       message: "OTP verified successfully",
+      ...tokens,
       user: {
         id: user.id,
         username: user.username,
         email: user.email,
+        role: user.role || "user",
         created_at: user.created_at,
       },
-      token,
     }, 200);
   } catch (error) {
     console.error("OTP verification error:", error);

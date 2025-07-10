@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { verifyPassword } from "../../utils/passwordHash";
-import { generateToken } from "../../utils/jwtHandler";
+import { generateTokenPair } from "../../utils/jwtHandler";
 
 export type Env = {
   DB: D1Database;
@@ -29,11 +29,11 @@ login.post("/", async (c) => {
 
     const { email, password } = result.data;
 
-    // ✅ Fix: Select `id` along with `password`
+    // Select user with role
     const userStmt = c.env.DB
-      .prepare("SELECT id, password FROM users WHERE email = ?")
+      .prepare("SELECT id, password, role FROM users WHERE email = ?")
       .bind(email);
-    const user = await userStmt.first<{ id: number; password: string }>();
+    const user = await userStmt.first<{ id: number; password: string; role?: string }>();
 
     if (!user) {
       return c.json({ error: "Invalid email or password" }, 401);
@@ -44,22 +44,52 @@ login.post("/", async (c) => {
       return c.json({ error: "Invalid email or password" }, 401);
     }
 
-    const token = await generateToken(user.id.toString(), email);
+    // Generate token pair
+    const tokens = await generateTokenPair(user.id.toString(), email, user.role);
 
     return c.json(
       {
         message: "Login successful",
-        token,
+        ...tokens,
         user: {
-            id: user.id,
-            email,
-          },
+          id: user.id,
+          email,
+          role: user.role || "user",
+        },
       },
       200
     );
   } catch (error) {
     console.error("Login error:", error);
     return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
+// Refresh token endpoint
+login.post("/refresh", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { refreshToken } = body;
+
+    if (!refreshToken) {
+      return c.json({ error: "Refresh token is required" }, 400);
+    }
+
+    const { verifyRefreshToken, generateTokenPair } = await import("../../utils/jwtHandler");
+    
+    // Verify refresh token
+    const payload = await verifyRefreshToken(refreshToken, c.env.DB);
+    
+    // Generate new token pair
+    const tokens = await generateTokenPair(payload.userId, payload.email, payload.role);
+
+    return c.json({
+      message: "Token refreshed successfully",
+      ...tokens,
+    });
+  } catch (error) {
+    console.error("Token refresh error:", error);
+    return c.json({ error: "Invalid refresh token" }, 401);
   }
 });
 

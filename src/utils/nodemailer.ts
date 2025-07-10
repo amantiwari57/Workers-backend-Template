@@ -4,11 +4,11 @@ export type Env = {
   API_KEY: string; // Brevo API Key
 };
 
-export async function sendOtpEmail(env: Env, to: string, otp: string) {
+export async function sendOtpEmail(env: Env, to: string, otp: string, subject?: string) {
   const emailData = {
     // Define the campaign settings
     name: 'Campaign sent via the API',
-    subject: 'Your One Time Password (OTP)',
+    subject: subject || 'Your One Time Password (OTP)',
     sender: {
       name: 'Auto Coder',
       email: 'dualdevssolutions@gmail.com', // Replace with your "from" email
