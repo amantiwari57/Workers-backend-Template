@@ -2,7 +2,7 @@ import { Context, Hono } from "hono";
 import { authenticate, verifyToken } from "../../utils/jwtHandler";
 import { z } from "zod";
 import Razorpay from "razorpay";
-import { computeHmacSHA256 } from "../../utils/hmac";
+import { computeHmacSHA256, verifyWebhookSignature } from "../../utils/hmac";
 
 // Define the payment schema using Zod
 const paymentSchema = z.object({
@@ -19,6 +19,17 @@ export type Env = {
   keyID: string;
   keySecret: string;
   WEBHOOK_SECRET: string;
+};
+
+// Define Razorpay payment types
+type RazorpayPayment = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  method: string;
+  order_id: string;
+  created_at: number;
 };
 
 // Define Cashfree response type based on their API docs
@@ -176,63 +187,127 @@ payments.post("/verify-payment", async (c) => {
     return c.json({ error: "Missing payment details" }, 400);
   }
 
-  const expectedSignature = await computeHmacSHA256(c.env.keySecret, razorpay_order_id, razorpay_payment_id);
+  // Initialize Razorpay
+  const razorpay = new Razorpay({
+    key_id: c.env.keyID,
+    key_secret: c.env.keySecret,
+  });
 
-  if (expectedSignature === razorpay_signature) {
-    // Update payment status in database
-    await c.env.DB.prepare(
-      `UPDATE payments SET paymentStatus = 'success' WHERE transactionID = ?`
-    )
-    .bind(razorpay_order_id)
-    .run();
+  try {
+    // Verify signature first
+    const expectedSignature = await computeHmacSHA256(c.env.keySecret, razorpay_order_id, razorpay_payment_id);
 
-    return c.json({ success: true, message: "Payment verified" });
-  } else {
-    return c.json({ error: "Invalid signature" }, 400);
+    if (expectedSignature !== razorpay_signature) {
+      return c.json({ error: "Invalid signature" }, 400);
+    }
+
+    // Fetch payment details from Razorpay
+    const payment = await razorpay.payments.fetch(razorpay_payment_id) as RazorpayPayment;
+    
+    // Check if payment is already captured
+    if (payment.status === 'captured') {
+      // Payment already captured, just update our database
+      await c.env.DB.prepare(
+        `UPDATE payments SET paymentStatus = 'success' WHERE transactionID = ?`
+      )
+      .bind(razorpay_order_id)
+      .run();
+
+      return c.json({ 
+        success: true, 
+        message: "Payment already verified",
+        payment: {
+          id: payment.id,
+          amount: payment.amount / 100, // Convert from paise to INR
+          currency: payment.currency,
+          status: payment.status,
+          method: payment.method
+        }
+      });
+    }
+
+    // Capture the payment if not already captured
+    if (payment.status === 'authorized') {
+      const capturedPayment = await razorpay.payments.capture(razorpay_payment_id, payment.amount, payment.currency) as RazorpayPayment;
+
+      // Update payment status in database
+      await c.env.DB.prepare(
+        `UPDATE payments SET paymentStatus = 'success' WHERE transactionID = ?`
+      )
+      .bind(razorpay_order_id)
+      .run();
+
+      return c.json({ 
+        success: true, 
+        message: "Payment captured successfully",
+        payment: {
+          id: capturedPayment.id,
+          amount: capturedPayment.amount / 100, // Convert from paise to INR
+          currency: capturedPayment.currency,
+          status: capturedPayment.status,
+          method: capturedPayment.method
+        }
+      });
+    }
+
+    // Handle other payment statuses
+    return c.json({ 
+      error: "Payment cannot be captured", 
+      status: payment.status 
+    }, 400);
+
+  } catch (error) {
+    console.error("Payment verification error:", error);
+    return c.json({ error: "Payment verification failed" }, 500);
   }
 });
 
 
-// payments.post("/webhook", async (c) => {
-//   try {
-//     // Retrieve the raw body and signature
-//     const rawBody = await c.req.text();
-//     const signature = c.req.header("x-razorpay-signature");
-//     const secret = c.env.WEBHOOK_SECRET;
+payments.post("/webhook", async (c) => {
+  try {
+    // Retrieve the raw body and signature
+    const rawBody = await c.req.text();
+    const signature = c.req.header("x-razorpay-signature");
+    const secret = c.env.WEBHOOK_SECRET;
 
-//     // Verify the signature
-//     const expectedSignature = await computeHmacSHA256(secret, rawBody);
-//     if (signature !== expectedSignature) {
-//       console.warn("Invalid webhook signature");
-//       return c.json({ error: "Invalid signature" }, 400);
-//     }
+    if (!signature) {
+      console.warn("Missing webhook signature");
+      return c.json({ error: "Missing signature" }, 400);
+    }
 
-//     // Parse the JSON body
-//     const body = JSON.parse(rawBody);
-//     const event = body.event;
+    // Verify the signature
+    const isValidSignature = await verifyWebhookSignature(secret, rawBody, signature);
+    if (!isValidSignature) {
+      console.warn("Invalid webhook signature");
+      return c.json({ error: "Invalid signature" }, 400);
+    }
 
-//     // Handle specific events
-//     if (event === "payment.captured") {
-//       const payment = body.payload.payment.entity;
-//       const transactionID = payment.order_id;
-//       const amount = payment.amount / 100; // Convert from paise to INR
-//       const paymentDate = new Date(payment.created_at * 1000).toISOString();
+    // Parse the JSON body
+    const body = JSON.parse(rawBody);
+    const event = body.event;
 
-//       // Update the payment record in the database
-//       await c.env.DB.prepare(
-//         `UPDATE payments SET paymentStatus = 'success', paymentDate = ? WHERE transactionID = ?`
-//       )
-//         .bind(paymentDate, transactionID)
-//         .run();
+    // Handle specific events
+    if (event === "payment.captured") {
+      const payment = body.payload.payment.entity;
+      const transactionID = payment.order_id;
+      const amount = payment.amount / 100; // Convert from paise to INR
+      const paymentDate = new Date(payment.created_at * 1000).toISOString();
 
-//       console.log(`Payment ${payment.id} captured and updated.`);
-//     }
+      // Update the payment record in the database
+      await c.env.DB.prepare(
+        `UPDATE payments SET paymentStatus = 'success', paymentDate = ? WHERE transactionID = ?`
+      )
+        .bind(paymentDate, transactionID)
+        .run();
 
-//     // Respond with a success status
-//     return c.json({ status: "ok" });
-//   } catch (error) {
-//     console.error("Webhook handling error:", error);
-//     return c.json({ error: "Internal server error" }, 500);
-//   }
-// });
+      console.log(`Payment ${payment.id} captured and updated.`);
+    }
+
+    // Respond with a success status
+    return c.json({ status: "ok" });
+  } catch (error) {
+    console.error("Webhook handling error:", error);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
 export default payments;
