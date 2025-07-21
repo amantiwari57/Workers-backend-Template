@@ -6,14 +6,14 @@
   "compatibility_flags": ["nodejs_compat"],
 
   "vars": {
-    "GOOGLE_CLIENT_ID": "245640490081-s0bitdegqg1hj9e3kk9v7hqhfe4nilho.apps.googleusercontent.com",
-    "GOOGLE_CLIENT_SECRET": "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",
+    "GOOGLE_CLIENT_ID": "YOUR-CLIENT-ID",
+    "GOOGLE_CLIENT_SECRET": "YOUR-CLIENT-SECRET",
     "GOOGLE_REDIRECT_URI": "http://localhost:8787/api/auth/google/callback",
-    "keyID": "rzp_test_ujZzg8XROGV3ED",
-    "webhookSecret": "Chirag@#*8133",
-    "keySecret": "SsvHbeNfYmWnlXHJPIgJplEn",
-    "SMTP_USER":"8b871f002@smtp-brevo.com",
-    "API_KEY":"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",
+    "keyID": "RZP-KEYID",
+    "webhookSecret": "YOUR-RZP-WEBHOOK-SECRET",
+    "keySecret": "YOUR-RZP-SECRET",
+    "SMTP_USER":"BREVO-SMTP-USER",
+    "API_KEY":"BREVO-API-KEY",
   },
   // "kv_namespaces": [
   //   {
@@ -31,7 +31,7 @@
     {
       "binding": "DB",
       "database_name": "live-coder",
-      "database_id": "66ee9821-0e09-4312-8b67-34c9e153c81d"
+      "database_id": "YOUR-DATABSE-ID"
     }
   ]
   // "ai": {
